@@ -734,10 +734,31 @@ const TaxCaddyStorage = (() => {
 
     // ── GitHub Contents API ────────────────────────────────────────────────
     async function fetchGithubTools() {
-        var apiUrl  = "https://api.github.com/repos/" + githubOwner + "/" + githubRepo + "/contents/" + githubDataPath + "?ref=" + githubBranch;
-        var headers = { "Accept": "application/vnd.github.v3+json" };
         var pat = getGithubPat();
-        if (pat) headers["Authorization"] = "token " + pat;
+
+        // When no PAT is available, fetch via raw.githubusercontent.com to avoid
+        // the GitHub API unauthenticated rate limit (60 req/hr per IP).
+        if (!pat) {
+            var rawUrl = "https://raw.githubusercontent.com/" + githubOwner + "/" + githubRepo + "/" + githubBranch + "/" + githubDataPath;
+            var rawResponse = await fetch(rawUrl);
+            if (!rawResponse.ok) {
+                if (rawResponse.status === 404) {
+                    saveLocalTools([]);
+                    setReadStatus("github");
+                    return [];
+                }
+                throw new Error("Failed to load applications: HTTP " + rawResponse.status);
+            }
+            var rawText = await rawResponse.text();
+            var rawParsed = JSON.parse(rawText);
+            var rawTools = normalizeTools(Array.isArray(rawParsed) ? rawParsed : []);
+            saveLocalTools(rawTools);
+            setReadStatus("github");
+            return rawTools;
+        }
+
+        var apiUrl  = "https://api.github.com/repos/" + githubOwner + "/" + githubRepo + "/contents/" + githubDataPath + "?ref=" + githubBranch;
+        var headers = { "Accept": "application/vnd.github.v3+json", "Authorization": "token " + pat };
 
         var response = await fetch(apiUrl, { headers: headers });
 
